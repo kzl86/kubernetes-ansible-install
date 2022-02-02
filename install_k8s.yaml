@@ -1,0 +1,43 @@
+---
+#
+# Playbook to install Kubernetes cluster
+#
+
+- hosts: all
+  remote_user: ansible
+  become: yes
+  become_user: root
+  roles:
+  - { role: os_packages }
+
+- hosts: controlplane
+  remote_user: ansible
+  become: yes
+  become_user: root
+  serial: 1
+  roles:
+  - { role: cluster_init }
+
+- hosts: worker
+  remote_user: ansible
+  become: yes
+  become_user: root
+  roles:
+  - { role: cluster_join }
+  - { role: cluster_worker_setup }
+
+- hosts: all
+  remote_user: ansible
+  become: yes
+  become_user: root
+  roles:
+  - { role: etc_hosts }
+
+# Default applications for the cluster
+#- hosts: controlplane
+#  remote_user: ansible
+#  become: yes
+#  become_user: root
+#  roles:
+#  - { role: metallb }
+#  - { role: nginx-ingress }

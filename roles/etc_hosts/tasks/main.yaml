@@ -1,0 +1,13 @@
+# roles/etc_hosts/tasks/main.yaml
+
+- name: Generate hosts file
+  delegate_to: localhost
+  become: no
+  run_once: true
+  shell: '(cat "{{ playbook_dir }}"/roles/etc_hosts/files/hosts_header; "{{ playbook_dir }}"/scripts/generate_etc_hosts.py "{{ inventory_file }}"| sort -n )>"{{ playbook_dir }}"/roles/etc_hosts/files/hosts'
+  register: output
+
+- name: Copy /etc/hosts to nodes
+  copy:
+    src: "{{ playbook_dir }}/roles/etc_hosts/files/hosts"
+    dest: /etc/hosts

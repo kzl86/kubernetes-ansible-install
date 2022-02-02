@@ -1,0 +1,8 @@
+
+- name: Set the label for worker node
+  delegate_to: '{{ controlplane_ip }}'
+  shell: kubectl --kubeconfig=/etc/kubernetes/admin.conf label node '{{ inventory_hostname }}' kubernetes.io/role=worker
+  register: label_command
+
+- debug:
+    msg: "{{ label_command.stdout }}"

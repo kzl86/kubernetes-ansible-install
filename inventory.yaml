@@ -1,0 +1,19 @@
+all:
+  children:
+    controlplane:
+      hosts:
+        k8s-mst-1:
+          ansible_host: 192.168.143.180
+    worker:
+      hosts:
+        k8s-wrk-1:
+          ansible_host: 192.168.143.181
+  vars:
+    controlplane_ip: 192.168.143.180
+    domain: bitmolnar.com
+    pod_network_cidr: 10.8.0.0/19
+    pod_network_manifest_file: calico.yaml
+    service_cidr: 10.8.32.0/22
+    version_containerd: 1.4.11-1
+    version_kubeadmin_cmd: 1.21.1
+    version_kubernetes: 1.21.1-00

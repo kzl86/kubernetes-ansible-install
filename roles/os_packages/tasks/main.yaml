@@ -1,0 +1,183 @@
+# roles/os_packages/tasks/main.yaml
+
+- name: Make the Swap inactive
+  command: "swapoff -a"
+
+- name: Remove Swap entry from /etc/fstab.
+  lineinfile:
+    dest: /etc/fstab
+    regexp: swap
+    state: absent
+
+- name: Check /etc/modules-load.d/containerd.conf
+  stat:
+    path: /etc/modules-load.d/containerd.conf
+  register: containerd_conf
+
+- name: Create a empty file for containerd module.
+  copy:
+    content: ""
+    dest: /etc/modules-load.d/containerd.conf
+    force: no
+  when: not containerd_conf.stat.exists
+
+- name: Configure module for containerd.
+  blockinfile:
+    path: /etc/modules-load.d/containerd.conf
+    block: |
+         overlay
+         br_netfilter
+  when: not containerd_conf.stat.exists
+
+- name: Load network and overlay modules for containerd.
+  service:
+    name: systemd-modules-load
+    state: restarted
+  when: not containerd_conf.stat.exists
+
+- name: Check /etc/sysctl.d/99-kubernetes-cri.conf
+  stat:
+    path: /etc/sysctl.d/99-kubernetes-cri.conf
+  register: kubernetes_cri_conf
+
+- name: Create a empty file for kubernetes sysctl params.
+  copy:
+    content: ""
+    dest: /etc/sysctl.d/99-kubernetes-cri.conf
+    force: no
+  when: not kubernetes_cri_conf.stat.exists
+
+- name: Configure sysctl params for Kubernetes.
+  lineinfile:
+    path: /etc/sysctl.d/99-kubernetes-cri.conf
+    line: "{{ item }}"
+  with_items:
+    - 'net.ipv4.ip_forward                 = 1'
+    - 'net.bridge.bridge-nf-call-iptables  = 1'
+    - 'net.bridge.bridge-nf-call-ip6tables = 1'
+  when: not kubernetes_cri_conf.stat.exists
+
+- name: Apply sysctl params without reboot.
+  command: sysctl --system
+  when: not kubernetes_cri_conf.stat.exists
+
+- name: Installing packages
+  apt:
+    name:
+    - apt-transport-https
+    - ca-certificates
+    - curl
+    - gpg
+    - lsb-release
+    - gnupg-agent
+    - vim
+    - software-properties-common
+    - acl
+    - jq
+    update_cache: yes
+    state: present
+
+- name: Add Docker/Containerd GPG key
+  apt_key:
+    url: https://download.docker.com/linux/debian/gpg
+    state: present
+- name: Add Kubernetes Repository
+  apt_repository:
+    repo: deb https://download.docker.com/linux/debian bullseye stable
+    state: present
+    filename: kubernetes
+    mode: 0600
+
+- name: Installing Containerd.io package
+  apt:
+    name:
+    - containerd.io='{{ version_containerd }}'
+    update_cache: yes
+    state: present
+
+- name: Create directory /etc/containerd.
+  file:
+    path: /etc/containerd
+    state: directory
+
+- name: "Check contanerd.toml configuration file"
+  shell: /usr/bin/grep "SystemdCgroup = true" /etc/containerd/config.toml | wc -l
+  register: configtoml
+
+- name: Configure containerd.
+  shell: /usr/bin/containerd config default > /etc/containerd/config.toml
+  when: configtoml.stdout == "0"
+
+- name: Add SystemdCgroup setting to config.toml
+  ansible.builtin.lineinfile:
+    path: /etc/containerd/config.toml
+    line: '            SystemdCgroup = true'
+    state: present
+    insertafter: '          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]'
+  when: configtoml.stdout == "0"
+
+- name: Restart containerd service when configured
+  systemd:
+    name: containerd
+    state: restarted
+    enabled: yes
+    daemon-reload: yes
+  register: systemd_containerd
+  when: configtoml.stdout == "0"
+
+- name: Enable containerd service
+  systemd:
+    name: containerd
+    state: started
+    enabled: yes
+    daemon-reload: yes
+  register: systemd_containerd
+
+- name: Add Google official GPG key
+  apt_key:
+    url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    state: present
+- name: Add Kubernetes Repository
+  apt_repository:
+    repo: deb http://apt.kubernetes.io/ kubernetes-xenial main
+    state: present
+    filename: kubernetes
+    mode: 0600
+- name: Installing Kubernetes Cluster Packages.
+  apt:
+    name:
+    - iptables
+    - libiptc0
+    - libxtables12
+    - kubeadm='{{ version_kubernetes }}'
+    - kubectl='{{ version_kubernetes }}'
+    - kubelet='{{ version_kubernetes }}'
+    update_cache: yes
+    state: present
+- name: Hold kubeadm
+  dpkg_selections:
+    name: kubeadm
+    selection: hold
+- name: Hold kubectl
+  dpkg_selections:
+    name: kubectl
+    selection: hold
+- name: Hold kubelet
+  dpkg_selections:
+    name: kubelet
+    selection: hold
+
+- name: Enable service kubelet, and enable persistently
+  service:
+    name: kubelet
+    state: started
+    enabled: yes
+  register: systemd_kubelet
+
+- name: Reboot the node
+  reboot:
+    post_reboot_delay: 10
+    reboot_timeout: 600
+    connect_timeout: 600
+    test_command: uptime
+  when: configtoml.stdout == "0" or (systemd_containerd.changed or systemd_kubelet.changed)

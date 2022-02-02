@@ -1,0 +1,23 @@
+
+- name: Check /etc/kubernetes/kubelet.conf for initialized Kubelet
+  stat:
+    path: /etc/kubernetes/kubelet.conf
+  register: kubelet_conf
+
+- name: Join to cluster
+  when: not kubelet_conf.stat.exists or kubelet_conf.stat.size == 0
+  block:
+    - name: Get the token for joining the nodes with Kuberntes master.
+      delegate_to: '{{ controlplane_ip }}'
+      shell: kubeadm token create --print-join-command
+      register: kubernetes_join_command
+
+    - debug:
+        msg: "{{ kubernetes_join_command.stdout }}"
+
+    - name: Join the Worker nodes with the master.
+      shell: "{{ kubernetes_join_command.stdout_lines[0] }}"
+      register: joined_or_not
+
+    - debug:
+        msg: "{{ joined_or_not.stdout }}"

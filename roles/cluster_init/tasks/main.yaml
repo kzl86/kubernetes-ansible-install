@@ -1,0 +1,71 @@
+# roles/cluster_init/tasks/main.yaml
+
+- name: Wait for containerd service
+  systemd:
+    name: containerd
+    state: started
+
+- name: Wait for kubelet service
+  systemd:
+    name: kubelet
+    state: started
+
+- name: Check /etc/kubernetes/admin.conf for initialized Kubernetes cluster
+  stat:
+    path: /etc/kubernetes/admin.conf
+  register: admin_conf
+
+- name: Cluster init
+  when: not admin_conf.stat.exists or admin_conf.stat.size == 0
+  block:
+    - name: Initalizing Kubernetes Cluster
+      command: kubeadm init --pod-network-cidr "{{ pod_network_cidr }}"  --service-cidr "{{ service_cidr }}" --apiserver-advertise-address "{{ controlplane_ip }}" --kubernetes-version "{{ version_kubeadmin_cmd }}"
+      run_once: true
+      delegate_to: "{{ controlplane_ip }}"
+      register: kubernetes_init_command
+
+    - debug:
+        msg: "{{ kubernetes_init_command.stdout }}"
+
+    - name: PodNodeSelector option set
+      shell: |
+             kubectl --kubeconfig=/etc/kubernetes/admin.conf get cm -o yaml -n kube-system kubeadm-config | sed 's/extraArgs:/extraArgs:\n        enable-admission-plugins: NodeRestriction,PodNodeSelector/' | kubectl  --kubeconfig=/etc/kubernetes/admin.conf apply -f - ; kubectl --kubeconfig=/etc/kubernetes/admin.conf get cm -n kube-system kubeadm-config -o jsonpath="{.data}" | jq -r '.ClusterConfiguration'  > /tmp/clusterconfiguration.yaml; kubeadm init phase control-plane apiserver --config /tmp/clusterconfiguration.yaml; rm /tmp/clusterconfiguration.yaml
+
+    - name: Wait for Kubernetes API
+      wait_for:
+        host: "{{ controlplane_ip }}"
+        port: 6443
+        delay: 30
+        timeout: 600
+        state: started
+
+# calico.yaml source is from the projectcalico.org site. Current version: 3.22
+# curl -s https://docs.projectcalico.org/manifests/calico.yaml > calico.yaml
+
+    - name: Copy Pod Network yaml
+      copy:
+        src: "../files/calico.yaml"
+        dest: /tmp/calico.yaml
+        owner: "root"
+        group: "root"
+        mode: 0644
+
+    - name: Create Pod Network
+      command: kubectl --kubeconfig=/etc/kubernetes/admin.conf apply -f /tmp/calico.yaml
+      register: network_cmd
+
+    - debug:
+        msg: "{{ network_cmd.stdout }}"
+
+    - name: Clean up the calico.yaml
+      file:
+       state: absent
+       path: /tmp/calico.yaml
+
+- name: Wait for Kubernetes API
+  wait_for:
+    host: "{{ controlplane_ip }}"
+    port: 6443
+    delay: 1
+    timeout: 600
+    state: started
