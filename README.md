@@ -12,5 +12,4 @@ Prepare before install:
 - fill out the inventory.yaml file with relevant information for your environment
 
 Install:
-- execute the following command in the root directory:
-ansible-playbook -i inventory.yaml install_k8s.yaml
+- execute the following command in the project's root directory: "ansible-playbook -i inventory.yaml install_k8s.yaml"
